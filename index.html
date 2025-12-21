@@ -14,8 +14,12 @@
       margin: 16px;
       background: #fafafa;
     }
-    h2 { margin-bottom: 4px; }
-    .meta { font-size: 12px; color: #666; margin-bottom: 12px; }
+    h2 { margin-bottom: 6px; }
+    .meta {
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 12px;
+    }
     .card {
       background: #fff;
       border: 1px solid #ddd;
@@ -71,12 +75,19 @@
   <button id="submit" disabled>送信</button>
   <div class="error" id="error"></div>
 
+  <!-- 送信用（CORS回避） -->
+  <iframe name="hidden_iframe" style="display:none;"></iframe>
+  <form id="submitForm" target="hidden_iframe" method="POST">
+    <input type="hidden" name="path" value="liff/submit">
+    <input type="hidden" name="payload" id="payloadInput">
+  </form>
+
 <script>
 /* ==============================
- * ★ 設定（あとで差し替え）
+ * ★ 設定（ここだけ後で差し替え）
  * ============================== */
-const LIFF_ID  = "2008741403-IveKN81E"; // ← LIFF作成後に差し替え
-const API_BASE = "https://script.google.com/macros/s/AKfycbygnXMyPWj_tdQdyujx7L1Ut5aFXim4bjB5n8_BkGhPrtz-a6fK2jJ-9Wogrpd7y0cZ7Q/exec?path=";
+const LIFF_ID  = "2008741403-IveKN81E"; // ← 作成した LIFF ID に差し替え
+const GAS_EXEC = "https://script.google.com/macros/s/AKfycbxGuuxRVAwXgj2LKJl5g-iAnwmrWXTdJ6EQwAgSQLjj7cuU9laUELvUYdk6iXW0Ar56jA/exec";
 /* ============================== */
 
 const qs = new URLSearchParams(location.search);
@@ -88,6 +99,7 @@ const errorEl  = document.getElementById("error");
 const submitEl = document.getElementById("submit");
 
 let items = [];
+let userId = "";
 
 /* ---------- utils ---------- */
 function escapeHtml(str) {
@@ -96,17 +108,33 @@ function escapeHtml(str) {
   );
 }
 
-async function api(path, payload) {
-  const res = await fetch(API_BASE + path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+/* ---------- JSONP（一覧取得） ---------- */
+function jsonpGet_(reqId, userId) {
+  return new Promise((resolve, reject) => {
+    const cb = "__cb_" + Date.now() + "_" + Math.random().toString(16).slice(2);
+    window[cb] = (data) => {
+      delete window[cb];
+      script.remove();
+      resolve(data);
+    };
+
+    const script = document.createElement("script");
+    script.onerror = () => {
+      delete window[cb];
+      script.remove();
+      reject(new Error("JSONP failed"));
+    };
+
+    const url =
+      GAS_EXEC +
+      "?path=liff/get" +
+      "&reqId=" + encodeURIComponent(reqId) +
+      "&userId=" + encodeURIComponent(userId) +
+      "&callback=" + encodeURIComponent(cb);
+
+    script.src = url;
+    document.head.appendChild(script);
   });
-  const text = await res.text();
-  let json;
-  try { json = JSON.parse(text); } catch { throw new Error(text); }
-  if (!res.ok || json.ok === false) throw new Error(json.error || text);
-  return json;
 }
 
 /* ---------- render ---------- */
@@ -157,32 +185,42 @@ async function main() {
   }
 
   const profile = await liff.getProfile();
-  const userId = profile.userId;
+  userId = profile.userId;
 
   metaEl.textContent = `依頼ID: ${reqId}`;
 
-  // 一覧取得（ユーザーごとにGASが制御）
-  const res = await api("liff/get", { reqId, userId });
-  items = res.items.map(x => ({
-    personId: x.personId,
-    personName: x.personName,
-    state: x.state || "NG",
-    reason: x.reason || "",
-  }));
+  try {
+    const res = await jsonpGet_(reqId, userId);
+    if (res.ok === false) throw new Error(res.error || "error");
 
-  render();
+    items = res.items.map(x => ({
+      personId: x.personId,
+      personName: x.personName,
+      state: x.state || "NG",
+      reason: x.reason || "",
+    }));
 
-  submitEl.addEventListener("click", async () => {
+    render();
+  } catch (err) {
+    errorEl.textContent = String(err);
+  }
+
+  submitEl.addEventListener("click", () => {
     submitEl.disabled = true;
     errorEl.textContent = "";
 
     try {
-      await api("liff/submit", { reqId, userId, items });
-      if (liff.isInClient()) {
-        liff.closeWindow();
-      } else {
-        metaEl.textContent = "送信しました";
-      }
+      const payload = { reqId, userId, items };
+      document.getElementById("submitForm").action = GAS_EXEC;
+      document.getElementById("payloadInput").value = JSON.stringify(payload);
+      document.getElementById("submitForm").submit();
+
+      // レスポンスは読めないので少し待って閉じる
+      setTimeout(() => {
+        if (liff.isInClient()) liff.closeWindow();
+        else metaEl.textContent = "送信しました";
+      }, 600);
+
     } catch (err) {
       errorEl.textContent = String(err);
       submitEl.disabled = false;
