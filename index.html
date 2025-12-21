@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>スキルマップ 一括回答</title>
+
+  <!-- LIFF SDK -->
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+
+  <style>
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif;
+      margin: 16px;
+      background: #fafafa;
+    }
+    h2 { margin-bottom: 4px; }
+    .meta { font-size: 12px; color: #666; margin-bottom: 12px; }
+    .card {
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+    .name {
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    select, button {
+      width: 100%;
+      padding: 10px;
+      font-size: 14px;
+    }
+    button {
+      margin-top: 16px;
+      background: #06c755;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    button:disabled {
+      background: #aaa;
+      cursor: not-allowed;
+    }
+    .note {
+      font-size: 12px;
+      color: #666;
+      margin-top: 4px;
+    }
+    .error {
+      color: #b00020;
+      white-space: pre-wrap;
+      margin-top: 12px;
+    }
+  </style>
+</head>
+
+<body>
+  <h2>スキルマップ 一括回答</h2>
+  <div class="meta" id="meta"></div>
+
+  <div id="list"></div>
+
+  <button id="submit" disabled>送信</button>
+  <div class="error" id="error"></div>
+
+<script>
+/* ==============================
+ * ★ 設定（あとで差し替え）
+ * ============================== */
+const LIFF_ID  = "DUMMY"; // ← LIFF作成後に差し替え
+const API_BASE = "https://script.google.com/macros/s/XXXX/exec?path=";
+/* ============================== */
+
+const qs = new URLSearchParams(location.search);
+const reqId = qs.get("req");
+
+const metaEl   = document.getElementById("meta");
+const listEl   = document.getElementById("list");
+const errorEl  = document.getElementById("error");
+const submitEl = document.getElementById("submit");
+
+let items = [];
+
+/* ---------- utils ---------- */
+function escapeHtml(str) {
+  return (str || "").replace(/[&<>"']/g, c =>
+    ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;", "'":"&#39;" }[c])
+  );
+}
+
+async function api(path, payload) {
+  const res = await fetch(API_BASE + path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const text = await res.text();
+  let json;
+  try { json = JSON.parse(text); } catch { throw new Error(text); }
+  if (!res.ok || json.ok === false) throw new Error(json.error || text);
+  return json;
+}
+
+/* ---------- render ---------- */
+function render() {
+  listEl.innerHTML = items.map((it, idx) => `
+    <div class="card">
+      <div class="name">${escapeHtml(it.personId)} ${escapeHtml(it.personName)}</div>
+      <div class="row">
+        <select data-idx="${idx}" data-key="state">
+          <option value="OK" ${it.state === "OK" ? "selected" : ""}>完了</option>
+          <option value="NG" ${it.state === "NG" ? "selected" : ""}>未完了</option>
+        </select>
+        <select data-idx="${idx}" data-key="reason">
+          <option value="">（理由なし）</option>
+          <option value="NOT_DONE" ${it.reason==="NOT_DONE"?"selected":""}>未実施</option>
+          <option value="DELAY_UNKNOWN" ${it.reason==="DELAY_UNKNOWN"?"selected":""}>延期（日程未定）</option>
+          <option value="DELAY_FIXED" ${it.reason==="DELAY_FIXED"?"selected":""}>延期（日程確定）</option>
+          <option value="PARTNER" ${it.reason==="PARTNER"?"selected":""}>相手都合</option>
+          <option value="SKIP" ${it.reason==="SKIP"?"selected":""}>スキップ</option>
+        </select>
+      </div>
+      <div class="note">※「完了」の場合、理由は空でOK</div>
+    </div>
+  `).join("");
+
+  listEl.querySelectorAll("select").forEach(sel => {
+    sel.addEventListener("change", e => {
+      const idx = Number(e.target.dataset.idx);
+      const key = e.target.dataset.key;
+      items[idx][key] = e.target.value;
+    });
+  });
+
+  submitEl.disabled = items.length === 0;
+}
+
+/* ---------- main ---------- */
+async function main() {
+  if (!reqId) {
+    errorEl.textContent = "URLに ?req=REQ-XXXX が必要です";
+    return;
+  }
+
+  await liff.init({ liffId: LIFF_ID });
+  if (!liff.isLoggedIn()) {
+    liff.login();
+    return;
+  }
+
+  const profile = await liff.getProfile();
+  const userId = profile.userId;
+
+  metaEl.textContent = `依頼ID: ${reqId}`;
+
+  // 一覧取得（ユーザーごとにGASが制御）
+  const res = await api("liff/get", { reqId, userId });
+  items = res.items.map(x => ({
+    personId: x.personId,
+    personName: x.personName,
+    state: x.state || "NG",
+    reason: x.reason || "",
+  }));
+
+  render();
+
+  submitEl.addEventListener("click", async () => {
+    submitEl.disabled = true;
+    errorEl.textContent = "";
+
+    try {
+      await api("liff/submit", { reqId, userId, items });
+      if (liff.isInClient()) {
+        liff.closeWindow();
+      } else {
+        metaEl.textContent = "送信しました";
+      }
+    } catch (err) {
+      errorEl.textContent = String(err);
+      submitEl.disabled = false;
+    }
+  });
+}
+
+main().catch(err => errorEl.textContent = String(err));
+</script>
+</body>
+</html>
