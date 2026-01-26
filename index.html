@@ -115,47 +115,54 @@ function safeDecode_(s) {
  * - リダイレクト後: ?liff.state=...（中に req が入ってる）
  */
 function getReqIdFromUrl() {
-  const url = new URL(window.location.href);
+  const href = window.location.href;
+  const url = new URL(href);
 
   // 1) 普通に ?req=
-  let req = url.searchParams.get("req");
-  if (req) return req;
+  const direct = url.searchParams.get("req");
+  if (direct) return direct;
 
   // 2) liff.state
-  const state = url.searchParams.get("liff.state");
-  if (!state) return null;
+  const stateRaw = url.searchParams.get("liff.state");
+  if (!stateRaw) return null;
 
-  const stateStr = safeDecode_(state);
+  // decode を最大2回試す（LIFFは二重になることがある）
+  const candidates = [stateRaw, safeDecode_(stateRaw), safeDecode_(safeDecode_(stateRaw))];
 
-  // (A) "req=REQ-xxx" / "?req=REQ-xxx"
-  const spA = new URLSearchParams(stateStr.startsWith("?") ? stateStr.slice(1) : stateStr);
-  req = spA.get("req");
-  if (req) return req;
+  for (const s of candidates) {
+    if (!s) continue;
 
-  // (B) "/?req=REQ-xxx" みたいなやつ
-  const qIndex = stateStr.indexOf("?");
-  if (qIndex >= 0) {
-    const spB = new URLSearchParams(stateStr.slice(qIndex + 1));
-    req = spB.get("req");
-    if (req) return req;
-  }
-
-  // (C) もう一段 decode が必要な場合
-  const stateStr2 = safeDecode_(stateStr);
-  if (stateStr2 !== stateStr) {
-    const spC = new URLSearchParams(stateStr2.startsWith("?") ? stateStr2.slice(1) : stateStr2);
-    req = spC.get("req");
+    // A) "req=..." / "?req=..."
+    let sp = new URLSearchParams(stripLeading_(s, "?"));
+    let req = sp.get("req");
     if (req) return req;
 
-    const q2 = stateStr2.indexOf("?");
-    if (q2 >= 0) {
-      const spD = new URLSearchParams(stateStr2.slice(q2 + 1));
-      req = spD.get("req");
+    // B) "/?req=..." / "https://.../?req=..."
+    // URLとして解釈できるなら解釈して searchParams を取る
+    try {
+      // 相対パスの場合もあるので base を付ける
+      const asUrl = new URL(s, window.location.origin);
+      req = asUrl.searchParams.get("req");
+      if (req) return req;
+    } catch (_) {}
+
+    // C) パスの中に ? があるケース（/path?req=...）
+    const q = s.indexOf("?");
+    if (q >= 0) {
+      sp = new URLSearchParams(s.slice(q + 1));
+      req = sp.get("req");
       if (req) return req;
     }
   }
-
   return null;
+}
+
+function stripLeading_(s, ch) {
+  return (s && s.startsWith(ch)) ? s.slice(1) : s;
+}
+
+function safeDecode_(s) {
+  try { return decodeURIComponent(s); } catch { return s; }
 }
 
 /* ---------- JSONP（一覧取得） ---------- */
