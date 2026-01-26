@@ -86,12 +86,9 @@
 /* ==============================
  * ★ 設定（ここだけ後で差し替え）
  * ============================== */
-const LIFF_ID  = "2008741403-IveKN81E"; // ← 作成した LIFF ID に差し替え
-const GAS_EXEC = "https://script.google.com/macros/s/AKfycbz7l3TfoNAfLXUInn4jLzXvmsLSlh68_FmDgYfCDb6UlGzy4gYNKQB87xIQPKTDJnmk1g/exec";
+const LIFF_ID  = "2008741403-IveKN81E"; // ← 作成した LIFF ID
+const GAS_EXEC = "https://script.google.com/macros/s/AKfycby8YbiGpmnR025t0VDhOp8vUqO3Rv7cO2S7Znok4DEcrRT2J3wyn_TXZU01V8QEeLsf3g/exec";
 /* ============================== */
-
-const qs = new URLSearchParams(location.search);
-const reqId = qs.get("req");
 
 const metaEl   = document.getElementById("meta");
 const listEl   = document.getElementById("list");
@@ -106,6 +103,59 @@ function escapeHtml(str) {
   return (str || "").replace(/[&<>"']/g, c =>
     ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;", "'":"&#39;" }[c])
   );
+}
+
+function safeDecode_(s) {
+  try { return decodeURIComponent(s); } catch { return s; }
+}
+
+/**
+ * ✅ req を URL から復元する（通常クエリ + liff.state 対応）
+ * - 通常: ?req=REQ-xxxx
+ * - リダイレクト後: ?liff.state=...（中に req が入ってる）
+ */
+function getReqIdFromUrl() {
+  const url = new URL(window.location.href);
+
+  // 1) 普通に ?req=
+  let req = url.searchParams.get("req");
+  if (req) return req;
+
+  // 2) liff.state
+  const state = url.searchParams.get("liff.state");
+  if (!state) return null;
+
+  const stateStr = safeDecode_(state);
+
+  // (A) "req=REQ-xxx" / "?req=REQ-xxx"
+  const spA = new URLSearchParams(stateStr.startsWith("?") ? stateStr.slice(1) : stateStr);
+  req = spA.get("req");
+  if (req) return req;
+
+  // (B) "/?req=REQ-xxx" みたいなやつ
+  const qIndex = stateStr.indexOf("?");
+  if (qIndex >= 0) {
+    const spB = new URLSearchParams(stateStr.slice(qIndex + 1));
+    req = spB.get("req");
+    if (req) return req;
+  }
+
+  // (C) もう一段 decode が必要な場合
+  const stateStr2 = safeDecode_(stateStr);
+  if (stateStr2 !== stateStr) {
+    const spC = new URLSearchParams(stateStr2.startsWith("?") ? stateStr2.slice(1) : stateStr2);
+    req = spC.get("req");
+    if (req) return req;
+
+    const q2 = stateStr2.indexOf("?");
+    if (q2 >= 0) {
+      const spD = new URLSearchParams(stateStr2.slice(q2 + 1));
+      req = spD.get("req");
+      if (req) return req;
+    }
+  }
+
+  return null;
 }
 
 /* ---------- JSONP（一覧取得） ---------- */
@@ -125,11 +175,12 @@ function jsonpGet_(reqId, userId) {
       reject(new Error("JSONP failed"));
     };
 
+    // userId はGAS側で未使用なら送らなくてOK（送ってもOK）
     const url =
       GAS_EXEC +
       "?path=liff/get" +
       "&reqId=" + encodeURIComponent(reqId) +
-      "&userId=" + encodeURIComponent(userId) +
+      "&userId=" + encodeURIComponent(userId || "") +
       "&callback=" + encodeURIComponent(cb);
 
     script.src = url;
@@ -141,7 +192,7 @@ function jsonpGet_(reqId, userId) {
 function render() {
   listEl.innerHTML = items.map((it, idx) => `
     <div class="card">
-      <div class="name">${escapeHtml(it.personId)} ${escapeHtml(it.personName)}</div>
+      <div class="name">${escapeHtml(it.personName)}</div>
       <div class="row">
         <select data-idx="${idx}" data-key="state">
           <option value="OK" ${it.state === "OK" ? "selected" : ""}>完了</option>
@@ -173,14 +224,18 @@ function render() {
 
 /* ---------- main ---------- */
 async function main() {
+  // ✅ リダイレクトに強い reqId 取得
+  const reqId = getReqIdFromUrl();
   if (!reqId) {
-    errorEl.textContent = "URLに ?req=REQ-XXXX が必要です";
+    errorEl.textContent = "URLに ?req=REQ-XXXX が必要です（リダイレクトで消えた場合は liff.state から復元しますが、復元できませんでした）";
     return;
   }
 
   await liff.init({ liffId: LIFF_ID });
+
   if (!liff.isLoggedIn()) {
-    liff.login();
+    // loginの戻り先にも req が必要なので、現在URLをそのまま渡す
+    liff.login({ redirectUri: window.location.href });
     return;
   }
 
@@ -193,9 +248,9 @@ async function main() {
     const res = await jsonpGet_(reqId, userId);
     if (res.ok === false) throw new Error(res.error || "error");
 
-    items = res.items.map(x => ({
-      personId: x.personId,
-      personName: x.personName,
+    items = (res.items || []).map(x => ({
+      personId: x.personId,           // 更新キー（GAS側は userId を入れている想定）
+      personName: x.personName,       // 表示名
       state: x.state || "NG",
       reason: x.reason || "",
     }));
