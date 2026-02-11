@@ -281,11 +281,11 @@ function render() {
       <div class="name">${escapeHtml(it.personName)}</div>
 
       <div class="radio-group" role="radiogroup" aria-label="ステータス選択">
-        ${radio(idx, it.status, "COMPLETED", "完了")}
         ${radio(idx, it.status, "DONE_INTERVIEW", "未完了（面談実施済）")}
         ${radio(idx, it.status, "NOT_DONE", "未完了（面談未実施）")}
         ${radio(idx, it.status, "NO_HEARING", "聴取未対応")}
         ${radio(idx, it.status, "NO_ACTION", "面談対応なし（休職・退職等）")}
+        ${radio(idx, it.status, "COMPLETED", "完了")}
       </div>
     </div>
   `).join("");
@@ -333,7 +333,7 @@ async function main() {
       personName: x.personName,       // 表示名
 
       // ✅ 初期値は完了（GAS側が status を返すならそれ優先）
-      status: x.status || "COMPLETED",
+      status: x.status || "DONE_INTERVIEW",
     }));
 
     render();
