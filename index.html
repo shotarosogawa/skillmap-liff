@@ -9,92 +9,148 @@
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 
   <style>
+    :root {
+      --bg: #fafafa;
+      --card-bg: #fff;
+      --border: #ddd;
+      --text: #111;
+      --muted: #666;
+      --primary: #06c755;
+      --danger: #b00020;
+      --radius: 12px;
+    }
+
+    * { box-sizing: border-box; }
+
     body {
       font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif;
       margin: 16px;
-      background: #fafafa;
+      background: var(--bg);
+      color: var(--text);
     }
-    h2 { margin-bottom: 6px; }
+
+    /* ✅ レイアウト：大画面は中央寄せ＋最大幅 */
+    .container {
+      max-width: 920px;
+      margin: 0 auto;
+    }
+
+    h2 { margin: 0 0 6px; }
     .meta {
       font-size: 12px;
-      color: #666;
+      color: var(--muted);
       margin-bottom: 12px;
     }
+
     .card {
-      background: #fff;
-      border: 1px solid #ddd;
-      border-radius: 10px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
       padding: 12px;
       margin-bottom: 12px;
     }
+
     .name {
-      font-weight: 600;
-      margin-bottom: 8px;
+      font-weight: 700;
+      margin-bottom: 10px;
+      line-height: 1.25;
+      word-break: break-word;
     }
 
-    /* ✅ 追加：ラジオ表示 */
+    /* ✅ ラジオ */
     .radio-group{
       display:flex;
       flex-direction:column;
-      gap:6px;
-    }
-    .radio{
-      display:flex;
-      align-items:center;
       gap:8px;
-      font-size:14px;
-      cursor:pointer;
-      user-select:none;
-    }
-    .radio input{
-      transform: scale(1.05);
     }
 
-    select, button {
-      width: 100%;
-      padding: 10px;
+    .radio{
+      display:flex;
+      align-items:flex-start;
+      gap:10px;
       font-size: 14px;
+      cursor:pointer;
+      user-select:none;
+      line-height: 1.25;
+      padding: 6px 8px;
+      border-radius: 10px;
     }
+
+    /* ✅ タップしやすいヒット領域 */
+    .radio input{
+      margin-top: 2px;
+      transform: scale(1.1);
+      flex: 0 0 auto;
+    }
+
+    /* ✅ 選択中の見た目（色指定は最低限） */
+    .radio:has(input:checked) {
+      outline: 2px solid rgba(6, 199, 85, 0.25);
+      background: rgba(6, 199, 85, 0.06);
+    }
+
     button {
+      width: 100%;
+      padding: 12px;
+      font-size: 15px;
       margin-top: 16px;
-      background: #06c755;
+      background: var(--primary);
       color: #fff;
       border: none;
-      border-radius: 8px;
+      border-radius: 10px;
       cursor: pointer;
     }
+
     button:disabled {
       background: #aaa;
       cursor: not-allowed;
     }
-    .note {
-      font-size: 12px;
-      color: #666;
-      margin-top: 8px;
-    }
+
     .error {
-      color: #b00020;
+      color: var(--danger);
       white-space: pre-wrap;
       margin-top: 12px;
+    }
+
+    /* ✅ レスポンシブ（スマホ優先 + 大画面調整） */
+    @media (min-width: 640px) {
+      body { margin: 20px; }
+      .card { padding: 14px; }
+      .radio { font-size: 15px; }
+      button { font-size: 16px; }
+    }
+
+    @media (min-width: 960px) {
+      body { margin: 24px; }
+      .card { padding: 16px; }
+    }
+
+    /* ✅ 小さい画面でも読みやすく */
+    @media (max-width: 360px) {
+      body { margin: 12px; }
+      .radio { padding: 6px; }
+      button { padding: 11px; }
     }
   </style>
 </head>
 
 <body>
-  <h2>スキルマップ 一括回答</h2>
-  <div class="meta" id="meta"></div>
+  <div class="container">
+    <h2>スキルマップ 一括回答</h2>
+    <div class="meta" id="meta"></div>
 
-  <div id="list"></div>
+    <div id="list"></div>
 
-  <button id="submit" disabled>送信</button>
-  <div class="error" id="error"></div>
+    <button id="submit" disabled>送信</button>
+    <div class="error" id="error"></div>
 
-  <!-- 送信用（CORS回避） -->
-  <iframe name="hidden_iframe" style="display:none;"></iframe>
-  <form id="submitForm" target="hidden_iframe" method="POST">
-    <input type="hidden" name="path" value="liff/submit">
-    <input type="hidden" name="payload" id="payloadInput">
-  </form>
+    <!-- 送信用（CORS回避） -->
+    <iframe name="hidden_iframe" style="display:none;"></iframe>
+    <form id="submitForm" target="hidden_iframe" method="POST">
+      <input type="hidden" name="path" value="liff/submit">
+      <input type="hidden" name="payload" id="payloadInput">
+    </form>
+  </div>
 
 <script>
 /* ==============================
@@ -202,7 +258,7 @@ function jsonpGet_(reqId, userId) {
   });
 }
 
-/* ---------- render（✅ ラジオ版） ---------- */
+/* ---------- render（ラジオ） ---------- */
 function radio(idx, current, value, label) {
   return `
     <label class="radio">
@@ -224,19 +280,17 @@ function render() {
     <div class="card">
       <div class="name">${escapeHtml(it.personName)}</div>
 
-      <div class="radio-group">
+      <div class="radio-group" role="radiogroup" aria-label="ステータス選択">
         ${radio(idx, it.status, "COMPLETED", "完了")}
         ${radio(idx, it.status, "DONE_INTERVIEW", "未完了（面談実施済）")}
         ${radio(idx, it.status, "NOT_DONE", "未完了（面談未実施）")}
         ${radio(idx, it.status, "NO_HEARING", "聴取未対応")}
         ${radio(idx, it.status, "NO_ACTION", "面談対応なし（休職・退職等）")}
       </div>
-
-      <div class="note">※「完了」の場合、それ以外の理由選択は不要です</div>
     </div>
   `).join("");
 
-  // ✅ ラジオはまとめて1箇所で拾う（イベント委譲）
+  // ✅ ラジオはイベント委譲でまとめて拾う
   listEl.onchange = (e) => {
     const el = e.target;
     if (!el.matches('input[type="radio"][data-key="status"]')) return;
@@ -250,6 +304,7 @@ function render() {
 
 /* ---------- main ---------- */
 async function main() {
+  // ✅ リダイレクトに強い reqId 取得
   const reqId = getReqIdFromUrl();
   if (!reqId) {
     errorEl.textContent = "URLに ?req=REQ-XXXX が必要です（リダイレクトで消えた場合は liff.state から復元しますが、復元できませんでした）";
@@ -259,6 +314,7 @@ async function main() {
   await liff.init({ liffId: LIFF_ID });
 
   if (!liff.isLoggedIn()) {
+    // loginの戻り先にも req が必要なので、現在URLをそのまま渡す
     liff.login({ redirectUri: window.location.href });
     return;
   }
@@ -273,12 +329,11 @@ async function main() {
     if (res.ok === false) throw new Error(res.error || "error");
 
     items = (res.items || []).map(x => ({
-      personId: x.personId,
-      personName: x.personName,
+      personId: x.personId,           // 更新キー（GAS側は userId を入れている想定）
+      personName: x.personName,       // 表示名
 
-      // ✅ 単一の状態で持つ（GAS側が old形式ならここで変換する）
-      // もしGASが status を返すならそれを優先
-      status: x.status || convertOldToStatus_(x.state, x.reason) || "NOT_DONE",
+      // ✅ 初期値は完了（GAS側が status を返すならそれ優先）
+      status: x.status || "COMPLETED",
     }));
 
     render();
@@ -296,6 +351,7 @@ async function main() {
       document.getElementById("payloadInput").value = JSON.stringify(payload);
       document.getElementById("submitForm").submit();
 
+      // レスポンスは読めないので少し待って閉じる
       setTimeout(() => {
         if (liff.isInClient()) liff.closeWindow();
         else metaEl.textContent = "送信しました";
@@ -306,21 +362,6 @@ async function main() {
       submitEl.disabled = false;
     }
   });
-}
-
-// ✅ 旧データ（state/reason）→ 新status 変換
-function convertOldToStatus_(state, reason) {
-  if (state === "OK") return "COMPLETED";
-  // state === "NG" の場合
-  switch (reason) {
-    case "": return "NOT_DONE";
-    case "NOT_DONE": return "NOT_DONE";
-    case "DELAY_UNKNOWN": return "NOT_DONE"; // 必要なら別statusに増やせる
-    case "DELAY_FIXED": return "NOT_DONE";
-    case "PARTNER": return "NOT_DONE";
-    case "SKIP": return "NO_ACTION";
-    default: return "NOT_DONE";
-  }
 }
 
 main().catch(err => errorEl.textContent = String(err));
