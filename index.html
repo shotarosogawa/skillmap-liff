@@ -31,11 +31,25 @@
       font-weight: 600;
       margin-bottom: 8px;
     }
-    .row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
+
+    /* ✅ 追加：ラジオ表示 */
+    .radio-group{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
     }
+    .radio{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      font-size:14px;
+      cursor:pointer;
+      user-select:none;
+    }
+    .radio input{
+      transform: scale(1.05);
+    }
+
     select, button {
       width: 100%;
       padding: 10px;
@@ -56,7 +70,7 @@
     .note {
       font-size: 12px;
       color: #666;
-      margin-top: 4px;
+      margin-top: 8px;
     }
     .error {
       color: #b00020;
@@ -105,6 +119,10 @@ function escapeHtml(str) {
   );
 }
 
+function stripLeading_(s, ch) {
+  return (s && s.startsWith(ch)) ? s.slice(1) : s;
+}
+
 function safeDecode_(s) {
   try { return decodeURIComponent(s); } catch { return s; }
 }
@@ -138,9 +156,7 @@ function getReqIdFromUrl() {
     if (req) return req;
 
     // B) "/?req=..." / "https://.../?req=..."
-    // URLとして解釈できるなら解釈して searchParams を取る
     try {
-      // 相対パスの場合もあるので base を付ける
       const asUrl = new URL(s, window.location.origin);
       req = asUrl.searchParams.get("req");
       if (req) return req;
@@ -155,14 +171,6 @@ function getReqIdFromUrl() {
     }
   }
   return null;
-}
-
-function stripLeading_(s, ch) {
-  return (s && s.startsWith(ch)) ? s.slice(1) : s;
-}
-
-function safeDecode_(s) {
-  try { return decodeURIComponent(s); } catch { return s; }
 }
 
 /* ---------- JSONP（一覧取得） ---------- */
@@ -182,7 +190,6 @@ function jsonpGet_(reqId, userId) {
       reject(new Error("JSONP failed"));
     };
 
-    // userId はGAS側で未使用なら送らなくてOK（送ってもOK）
     const url =
       GAS_EXEC +
       "?path=liff/get" +
@@ -195,43 +202,54 @@ function jsonpGet_(reqId, userId) {
   });
 }
 
-/* ---------- render ---------- */
+/* ---------- render（✅ ラジオ版） ---------- */
+function radio(idx, current, value, label) {
+  return `
+    <label class="radio">
+      <input
+        type="radio"
+        name="status-${idx}"
+        data-idx="${idx}"
+        data-key="status"
+        value="${value}"
+        ${current === value ? "checked" : ""}
+      >
+      <span>${label}</span>
+    </label>
+  `;
+}
+
 function render() {
   listEl.innerHTML = items.map((it, idx) => `
     <div class="card">
       <div class="name">${escapeHtml(it.personName)}</div>
-      <div class="row">
-        <select data-idx="${idx}" data-key="state">
-          <option value="OK" ${it.state === "OK" ? "selected" : ""}>完了</option>
-          <option value="NG" ${it.state === "NG" ? "selected" : ""}>未完了</option>
-        </select>
-        <select data-idx="${idx}" data-key="reason">
-          <option value="">（理由なし）</option>
-          <option value="NOT_DONE" ${it.reason==="NOT_DONE"?"selected":""}>未実施</option>
-          <option value="DELAY_UNKNOWN" ${it.reason==="DELAY_UNKNOWN"?"selected":""}>延期（日程未定）</option>
-          <option value="DELAY_FIXED" ${it.reason==="DELAY_FIXED"?"selected":""}>延期（日程確定）</option>
-          <option value="PARTNER" ${it.reason==="PARTNER"?"selected":""}>相手都合</option>
-          <option value="SKIP" ${it.reason==="SKIP"?"selected":""}>スキップ</option>
-        </select>
+
+      <div class="radio-group">
+        ${radio(idx, it.status, "COMPLETED", "完了")}
+        ${radio(idx, it.status, "DONE_INTERVIEW", "未完了（面談実施済）")}
+        ${radio(idx, it.status, "NOT_DONE", "未完了（面談未実施）")}
+        ${radio(idx, it.status, "NO_HEARING", "聴取未対応")}
+        ${radio(idx, it.status, "NO_ACTION", "面談対応なし（休職・退職等）")}
       </div>
-      <div class="note">※「完了」の場合、理由は空でOK</div>
+
+      <div class="note">※「完了」の場合、それ以外の理由選択は不要です</div>
     </div>
   `).join("");
 
-  listEl.querySelectorAll("select").forEach(sel => {
-    sel.addEventListener("change", e => {
-      const idx = Number(e.target.dataset.idx);
-      const key = e.target.dataset.key;
-      items[idx][key] = e.target.value;
-    });
-  });
+  // ✅ ラジオはまとめて1箇所で拾う（イベント委譲）
+  listEl.onchange = (e) => {
+    const el = e.target;
+    if (!el.matches('input[type="radio"][data-key="status"]')) return;
+
+    const idx = Number(el.dataset.idx);
+    items[idx].status = el.value;
+  };
 
   submitEl.disabled = items.length === 0;
 }
 
 /* ---------- main ---------- */
 async function main() {
-  // ✅ リダイレクトに強い reqId 取得
   const reqId = getReqIdFromUrl();
   if (!reqId) {
     errorEl.textContent = "URLに ?req=REQ-XXXX が必要です（リダイレクトで消えた場合は liff.state から復元しますが、復元できませんでした）";
@@ -241,7 +259,6 @@ async function main() {
   await liff.init({ liffId: LIFF_ID });
 
   if (!liff.isLoggedIn()) {
-    // loginの戻り先にも req が必要なので、現在URLをそのまま渡す
     liff.login({ redirectUri: window.location.href });
     return;
   }
@@ -256,10 +273,12 @@ async function main() {
     if (res.ok === false) throw new Error(res.error || "error");
 
     items = (res.items || []).map(x => ({
-      personId: x.personId,           // 更新キー（GAS側は userId を入れている想定）
-      personName: x.personName,       // 表示名
-      state: x.state || "NG",
-      reason: x.reason || "",
+      personId: x.personId,
+      personName: x.personName,
+
+      // ✅ 単一の状態で持つ（GAS側が old形式ならここで変換する）
+      // もしGASが status を返すならそれを優先
+      status: x.status || convertOldToStatus_(x.state, x.reason) || "NOT_DONE",
     }));
 
     render();
@@ -277,7 +296,6 @@ async function main() {
       document.getElementById("payloadInput").value = JSON.stringify(payload);
       document.getElementById("submitForm").submit();
 
-      // レスポンスは読めないので少し待って閉じる
       setTimeout(() => {
         if (liff.isInClient()) liff.closeWindow();
         else metaEl.textContent = "送信しました";
@@ -288,6 +306,21 @@ async function main() {
       submitEl.disabled = false;
     }
   });
+}
+
+// ✅ 旧データ（state/reason）→ 新status 変換
+function convertOldToStatus_(state, reason) {
+  if (state === "OK") return "COMPLETED";
+  // state === "NG" の場合
+  switch (reason) {
+    case "": return "NOT_DONE";
+    case "NOT_DONE": return "NOT_DONE";
+    case "DELAY_UNKNOWN": return "NOT_DONE"; // 必要なら別statusに増やせる
+    case "DELAY_FIXED": return "NOT_DONE";
+    case "PARTNER": return "NOT_DONE";
+    case "SKIP": return "NO_ACTION";
+    default: return "NOT_DONE";
+  }
 }
 
 main().catch(err => errorEl.textContent = String(err));
