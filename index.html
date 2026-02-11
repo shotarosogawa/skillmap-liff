@@ -29,7 +29,6 @@
       color: var(--text);
     }
 
-    /* ✅ レイアウト：大画面は中央寄せ＋最大幅 */
     .container {
       max-width: 920px;
       margin: 0 auto;
@@ -76,14 +75,12 @@
       border-radius: 10px;
     }
 
-    /* ✅ タップしやすいヒット領域 */
     .radio input{
       margin-top: 2px;
       transform: scale(1.1);
       flex: 0 0 auto;
     }
 
-    /* ✅ 選択中の見た目（色指定は最低限） */
     .radio:has(input:checked) {
       outline: 2px solid rgba(6, 199, 85, 0.25);
       background: rgba(6, 199, 85, 0.06);
@@ -112,7 +109,16 @@
       margin-top: 12px;
     }
 
-    /* ✅ レスポンシブ（スマホ優先 + 大画面調整） */
+    /* ✅ 追加：空表示 */
+    .empty {
+      background: var(--card-bg);
+      border: 1px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+      color: var(--muted);
+      text-align: center;
+    }
+
     @media (min-width: 640px) {
       body { margin: 20px; }
       .card { padding: 14px; }
@@ -125,7 +131,6 @@
       .card { padding: 16px; }
     }
 
-    /* ✅ 小さい画面でも読みやすく */
     @media (max-width: 360px) {
       body { margin: 12px; }
       .radio { padding: 6px; }
@@ -156,7 +161,7 @@
 /* ==============================
  * ★ 設定（ここだけ後で差し替え）
  * ============================== */
-const LIFF_ID  = "2008741403-IveKN81E"; // ← 作成した LIFF ID
+const LIFF_ID  = "2008741403-IveKN81E";
 const GAS_EXEC = "https://script.google.com/macros/s/AKfycbz6P-GzitUx8m1RedOwPbiFrFFL2uVyjCXCukmX0OIZnbUZvEX4buOlGWpwgyqOp38/exec";
 /* ============================== */
 
@@ -185,40 +190,32 @@ function safeDecode_(s) {
 
 /**
  * ✅ req を URL から復元する（通常クエリ + liff.state 対応）
- * - 通常: ?req=REQ-xxxx
- * - リダイレクト後: ?liff.state=...（中に req が入ってる）
  */
 function getReqIdFromUrl() {
   const href = window.location.href;
   const url = new URL(href);
 
-  // 1) 普通に ?req=
   const direct = url.searchParams.get("req");
   if (direct) return direct;
 
-  // 2) liff.state
   const stateRaw = url.searchParams.get("liff.state");
   if (!stateRaw) return null;
 
-  // decode を最大2回試す（LIFFは二重になることがある）
   const candidates = [stateRaw, safeDecode_(stateRaw), safeDecode_(safeDecode_(stateRaw))];
 
   for (const s of candidates) {
     if (!s) continue;
 
-    // A) "req=..." / "?req=..."
     let sp = new URLSearchParams(stripLeading_(s, "?"));
     let req = sp.get("req");
     if (req) return req;
 
-    // B) "/?req=..." / "https://.../?req=..."
     try {
       const asUrl = new URL(s, window.location.origin);
       req = asUrl.searchParams.get("req");
       if (req) return req;
     } catch (_) {}
 
-    // C) パスの中に ? があるケース（/path?req=...）
     const q = s.indexOf("?");
     if (q >= 0) {
       sp = new URLSearchParams(s.slice(q + 1));
@@ -276,6 +273,13 @@ function radio(idx, current, value, label) {
 }
 
 function render() {
+  // ✅ データ無しの表示
+  if (!items || items.length === 0) {
+    listEl.innerHTML = `<div class="empty">未報告のデータはありません</div>`;
+    submitEl.disabled = true;
+    return;
+  }
+
   listEl.innerHTML = items.map((it, idx) => `
     <div class="card">
       <div class="name">${escapeHtml(it.personName)}</div>
@@ -290,7 +294,6 @@ function render() {
     </div>
   `).join("");
 
-  // ✅ ラジオはイベント委譲でまとめて拾う
   listEl.onchange = (e) => {
     const el = e.target;
     if (!el.matches('input[type="radio"][data-key="status"]')) return;
@@ -299,12 +302,11 @@ function render() {
     items[idx].status = el.value;
   };
 
-  submitEl.disabled = items.length === 0;
+  submitEl.disabled = false;
 }
 
 /* ---------- main ---------- */
 async function main() {
-  // ✅ リダイレクトに強い reqId 取得
   const reqId = getReqIdFromUrl();
   if (!reqId) {
     errorEl.textContent = "URLに ?req=REQ-XXXX が必要です（リダイレクトで消えた場合は liff.state から復元しますが、復元できませんでした）";
@@ -314,7 +316,6 @@ async function main() {
   await liff.init({ liffId: LIFF_ID });
 
   if (!liff.isLoggedIn()) {
-    // loginの戻り先にも req が必要なので、現在URLをそのまま渡す
     liff.login({ redirectUri: window.location.href });
     return;
   }
@@ -329,16 +330,15 @@ async function main() {
     if (res.ok === false) throw new Error(res.error || "error");
 
     items = (res.items || []).map(x => ({
-      personId: x.personId,           // 更新キー（GAS側は userId を入れている想定）
-      personName: x.personName,       // 表示名
-
-      // ✅ 初期値は完了（GAS側が status を返すならそれ優先）
+      personId: x.personId,
+      personName: x.personName,
       status: x.status || "DONE_INTERVIEW",
     }));
 
     render();
   } catch (err) {
     errorEl.textContent = String(err);
+    // 取得失敗は “未報告なし” ではなくエラーなので、renderは呼ばない
   }
 
   submitEl.addEventListener("click", () => {
@@ -351,7 +351,6 @@ async function main() {
       document.getElementById("payloadInput").value = JSON.stringify(payload);
       document.getElementById("submitForm").submit();
 
-      // レスポンスは読めないので少し待って閉じる
       setTimeout(() => {
         if (liff.isInClient()) liff.closeWindow();
         else metaEl.textContent = "送信しました";
