@@ -136,6 +136,70 @@
       .radio { padding: 6px; }
       button { padding: 11px; }
     }
+
+    /* =========================
+     * ✅ 追加：ローディング & トースト
+     * ========================= */
+
+    /* ✅ ローディングオーバーレイ */
+    .loading{
+      position: fixed;
+      inset: 0;
+      display: none;              /* ←普段は非表示 */
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 12px;
+      background: rgba(250,250,250,0.85);
+      backdrop-filter: blur(2px);
+      z-index: 9999;
+    }
+
+    .loading.is-active{
+      display: flex;
+    }
+
+    .spinner{
+      width: 44px;
+      height: 44px;
+      border: 4px solid rgba(0,0,0,0.12);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+
+    @keyframes spin{
+      to { transform: rotate(360deg); }
+    }
+
+    .loading__text{
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    /* ✅ トースト（送信しました等） */
+    .toast{
+      position: fixed;
+      left: 50%;
+      bottom: 18px;
+      transform: translateX(-50%) translateY(20px);
+      opacity: 0;
+      pointer-events: none;
+      background: rgba(17,17,17,0.92);
+      color: #fff;
+      padding: 10px 12px;
+      border-radius: 12px;
+      font-size: 14px;
+      max-width: min(92vw, 520px);
+      text-align: center;
+      z-index: 10000;
+      transition: opacity 160ms ease, transform 160ms ease;
+    }
+
+    .toast.is-show{
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
   </style>
 </head>
 
@@ -148,6 +212,15 @@
 
     <button id="submit" disabled>送信</button>
     <div class="error" id="error"></div>
+
+    <!-- ✅ ローディング（通信中） -->
+    <div id="loading" class="loading" aria-hidden="true">
+      <div class="spinner" aria-label="loading"></div>
+      <div class="loading__text" id="loadingText">通信中...</div>
+    </div>
+
+    <!-- ✅ 送信完了メッセージ（トースト） -->
+    <div id="toast" class="toast" aria-hidden="true"></div>
 
     <!-- 送信用（CORS回避） -->
     <iframe name="hidden_iframe" style="display:none;"></iframe>
@@ -170,6 +243,11 @@ const listEl   = document.getElementById("list");
 const errorEl  = document.getElementById("error");
 const submitEl = document.getElementById("submit");
 
+/* ✅ 追加：ローディング・トースト */
+const loadingEl = document.getElementById("loading");
+const loadingTextEl = document.getElementById("loadingText");
+const toastEl = document.getElementById("toast");
+
 let items = [];
 let userId = "";
 
@@ -186,6 +264,29 @@ function stripLeading_(s, ch) {
 
 function safeDecode_(s) {
   try { return decodeURIComponent(s); } catch { return s; }
+}
+
+/* ✅ ローディング表示制御 */
+function setLoading(on, text = "通信中...") {
+  if (on) {
+    loadingTextEl.textContent = text;
+    loadingEl.classList.add("is-active");
+    loadingEl.setAttribute("aria-hidden", "false");
+  } else {
+    loadingEl.classList.remove("is-active");
+    loadingEl.setAttribute("aria-hidden", "true");
+  }
+}
+
+/* ✅ トースト表示 */
+function showToast(msg, ms = 1800) {
+  toastEl.textContent = msg;
+  toastEl.classList.add("is-show");
+  toastEl.setAttribute("aria-hidden", "false");
+  setTimeout(() => {
+    toastEl.classList.remove("is-show");
+    toastEl.setAttribute("aria-hidden", "true");
+  }, ms);
 }
 
 /**
@@ -313,9 +414,12 @@ async function main() {
     return;
   }
 
+  setLoading(true, "LIFF 初期化中...");
+
   await liff.init({ liffId: LIFF_ID });
 
   if (!liff.isLoggedIn()) {
+    setLoading(false);
     liff.login({ redirectUri: window.location.href });
     return;
   }
@@ -326,6 +430,7 @@ async function main() {
   metaEl.textContent = `依頼ID: ${reqId}`;
 
   try {
+    setLoading(true, "一覧を取得中...");
     const res = await jsonpGet_(reqId, userId);
     if (res.ok === false) throw new Error(res.error || "error");
 
@@ -339,6 +444,8 @@ async function main() {
   } catch (err) {
     errorEl.textContent = String(err);
     // 取得失敗は “未報告なし” ではなくエラーなので、renderは呼ばない
+  } finally {
+    setLoading(false);
   }
 
   submitEl.addEventListener("click", () => {
@@ -346,24 +453,35 @@ async function main() {
     errorEl.textContent = "";
 
     try {
+      setLoading(true, "送信中...");
+
       const payload = { reqId, userId, items };
       document.getElementById("submitForm").action = GAS_EXEC;
       document.getElementById("payloadInput").value = JSON.stringify(payload);
       document.getElementById("submitForm").submit();
 
+      // ✅ 送信メッセージ表示
+      showToast("送信しました");
+
+      // ✅ LIFF内なら少し見せてから閉じる
       setTimeout(() => {
+        setLoading(false);
         if (liff.isInClient()) liff.closeWindow();
         else metaEl.textContent = "送信しました";
-      }, 600);
+      }, 900);
 
     } catch (err) {
+      setLoading(false);
       errorEl.textContent = String(err);
       submitEl.disabled = false;
     }
   });
 }
 
-main().catch(err => errorEl.textContent = String(err));
+main().catch(err => {
+  setLoading(false);
+  errorEl.textContent = String(err);
+});
 </script>
 </body>
 </html>
