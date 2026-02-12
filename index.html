@@ -437,7 +437,7 @@ async function main() {
     items = (res.items || []).map(x => ({
       personId: x.personId,
       personName: x.personName,
-      status: x.status || "DONE_INTERVIEW",
+      status: x.status || "COMPLETED",
     }));
 
     render();
