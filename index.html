@@ -232,10 +232,10 @@
 
 <script>
 /* ==============================
- * ★ 設定（ここだけ後で差し替え）
+ * ★ 設定
  * ============================== */
-const LIFF_ID  = "2008741403-IveKN81E";
 const GAS_EXEC = "https://script.google.com/macros/s/AKfycbwl3k91dyNUk0SC3tpuCHTBIwuzGEpoXazaGZDeRI_QV6KsLGOVortmlJrCHzp4iKd4HA/exec";
+
 /* ============================== */
 
 const metaEl   = document.getElementById("meta");
@@ -243,245 +243,221 @@ const listEl   = document.getElementById("list");
 const errorEl  = document.getElementById("error");
 const submitEl = document.getElementById("submit");
 
-/* ✅ 追加：ローディング・トースト */
 const loadingEl = document.getElementById("loading");
 const loadingTextEl = document.getElementById("loadingText");
 const toastEl = document.getElementById("toast");
 
 let items = [];
-let userId = "";
 
 /* ---------- utils ---------- */
-function escapeHtml(str) {
-  return (str || "").replace(/[&<>"']/g, c =>
-    ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;", "'":"&#39;" }[c])
-  );
-}
 
-function stripLeading_(s, ch) {
-  return (s && s.startsWith(ch)) ? s.slice(1) : s;
-}
-
-function safeDecode_(s) {
-  try { return decodeURIComponent(s); } catch { return s; }
-}
-
-/* ✅ ローディング表示制御 */
-function setLoading(on, text = "通信中...") {
-  if (on) {
-    loadingTextEl.textContent = text;
+function setLoading(on,text="通信中..."){
+  if(on){
+    loadingTextEl.textContent=text;
     loadingEl.classList.add("is-active");
-    loadingEl.setAttribute("aria-hidden", "false");
-  } else {
+  }else{
     loadingEl.classList.remove("is-active");
-    loadingEl.setAttribute("aria-hidden", "true");
   }
 }
 
-/* ✅ トースト表示 */
-function showToast(msg, ms = 1800) {
-  toastEl.textContent = msg;
+function showToast(msg,ms=1800){
+  toastEl.textContent=msg;
   toastEl.classList.add("is-show");
-  toastEl.setAttribute("aria-hidden", "false");
-  setTimeout(() => {
+
+  setTimeout(()=>{
     toastEl.classList.remove("is-show");
-    toastEl.setAttribute("aria-hidden", "true");
-  }, ms);
+  },ms);
 }
 
-/**
- * ✅ req を URL から復元する（通常クエリ + liff.state 対応）
- */
-function getReqIdFromUrl() {
-  const href = window.location.href;
-  const url = new URL(href);
+/* ---------- URL ---------- */
 
-  const direct = url.searchParams.get("req");
-  if (direct) return direct;
+function getParams(){
+  const qs=new URLSearchParams(location.search);
 
-  const stateRaw = url.searchParams.get("liff.state");
-  if (!stateRaw) return null;
-
-  const candidates = [stateRaw, safeDecode_(stateRaw), safeDecode_(safeDecode_(stateRaw))];
-
-  for (const s of candidates) {
-    if (!s) continue;
-
-    let sp = new URLSearchParams(stripLeading_(s, "?"));
-    let req = sp.get("req");
-    if (req) return req;
-
-    try {
-      const asUrl = new URL(s, window.location.origin);
-      req = asUrl.searchParams.get("req");
-      if (req) return req;
-    } catch (_) {}
-
-    const q = s.indexOf("?");
-    if (q >= 0) {
-      sp = new URLSearchParams(s.slice(q + 1));
-      req = sp.get("req");
-      if (req) return req;
-    }
-  }
-  return null;
+  return{
+    reqId:qs.get("req"),
+    token:qs.get("token")
+  };
 }
 
-/* ---------- JSONP（一覧取得） ---------- */
-function jsonpGet_(reqId, userId) {
-  return new Promise((resolve, reject) => {
-    const cb = "__cb_" + Date.now() + "_" + Math.random().toString(16).slice(2);
-    window[cb] = (data) => {
+/* ---------- JSONP ---------- */
+
+function jsonpGet_(reqId,token){
+
+  return new Promise((resolve,reject)=>{
+
+    const cb="__cb_"+Date.now();
+
+    window[cb]=(data)=>{
       delete window[cb];
       script.remove();
       resolve(data);
     };
 
-    const script = document.createElement("script");
-    script.onerror = () => {
+    const script=document.createElement("script");
+
+    script.onerror=()=>{
       delete window[cb];
       script.remove();
       reject(new Error("JSONP failed"));
     };
 
-    const url =
-      GAS_EXEC +
-      "?path=liff/get" +
-      "&reqId=" + encodeURIComponent(reqId) +
-      "&userId=" + encodeURIComponent(userId || "") +
-      "&callback=" + encodeURIComponent(cb);
+    script.src=
+      GAS_EXEC+
+      "?path=get"+
+      "&reqId="+encodeURIComponent(reqId)+
+      "&token="+encodeURIComponent(token)+
+      "&callback="+cb;
 
-    script.src = url;
     document.head.appendChild(script);
+
   });
+
 }
 
-/* ---------- render（ラジオ） ---------- */
-function radio(idx, current, value, label) {
-  return `
-    <label class="radio">
-      <input
-        type="radio"
-        name="status-${idx}"
-        data-idx="${idx}"
-        data-key="status"
-        value="${value}"
-        ${current === value ? "checked" : ""}
-      >
-      <span>${label}</span>
-    </label>
-  `;
+/* ---------- render ---------- */
+
+function radio(idx,current,value,label){
+return `
+<label class="radio">
+<input
+type="radio"
+name="status-${idx}"
+data-idx="${idx}"
+data-key="status"
+value="${value}"
+${current===value?"checked":""}
+>
+<span>${label}</span>
+</label>
+`;
 }
 
-function render() {
-  // ✅ データ無しの表示
-  if (!items || items.length === 0) {
-    listEl.innerHTML = `<div class="empty">未報告のデータはありません</div>`;
-    submitEl.disabled = true;
+function render(){
+
+  if(!items || items.length===0){
+    listEl.innerHTML=`<div class="empty">未報告のデータはありません</div>`;
+    submitEl.disabled=true;
     return;
   }
 
-  listEl.innerHTML = items.map((it, idx) => `
-    <div class="card">
-      <div class="name">${escapeHtml(it.personName)}</div>
+  listEl.innerHTML=items.map((it,idx)=>`
 
-      <div class="radio-group" role="radiogroup" aria-label="ステータス選択">
-        ${radio(idx, it.status, "DONE_INTERVIEW", "未完了（面談実施済）")}
-        ${radio(idx, it.status, "NOT_DONE", "未完了（面談未実施）")}
-        ${radio(idx, it.status, "NO_HEARING", "聴取未対応")}
-        ${radio(idx, it.status, "NO_ACTION", "面談対応なし（休職・退職等）")}
-        ${radio(idx, it.status, "COMPLETED", "完了")}
-      </div>
-    </div>
-  `).join("");
+<div class="card">
 
-  listEl.onchange = (e) => {
-    const el = e.target;
-    if (!el.matches('input[type="radio"][data-key="status"]')) return;
+<div class="name">${it.personName}</div>
 
-    const idx = Number(el.dataset.idx);
-    items[idx].status = el.value;
-  };
+<div class="radio-group">
 
-  submitEl.disabled = false;
+${radio(idx,it.status,"DONE_INTERVIEW","未完了（面談実施済）")}
+${radio(idx,it.status,"NOT_DONE","未完了（面談未実施）")}
+${radio(idx,it.status,"NO_HEARING","聴取未対応")}
+${radio(idx,it.status,"NO_ACTION","面談対応なし（休職・退職等）")}
+${radio(idx,it.status,"COMPLETED","完了")}
+
+</div>
+
+</div>
+
+`).join("");
+
+listEl.onchange=e=>{
+
+ const el=e.target;
+
+ if(!el.matches('input[type="radio"]')) return;
+
+ const idx=Number(el.dataset.idx);
+
+ items[idx].status=el.value;
+
+};
+
+submitEl.disabled=false;
+
 }
 
 /* ---------- main ---------- */
-async function main() {
-  const reqId = getReqIdFromUrl();
-  if (!reqId) {
-    errorEl.textContent = "URLに ?req=REQ-XXXX が必要です（リダイレクトで消えた場合は liff.state から復元しますが、復元できませんでした）";
-    return;
-  }
 
-  setLoading(true, "LIFF 初期化中...");
+async function main(){
 
-  await liff.init({ liffId: LIFF_ID });
+ const {reqId,token}=getParams();
 
-  if (!liff.isLoggedIn()) {
+ if(!reqId || !token){
+   errorEl.textContent="URLが不正です";
+   return;
+ }
+
+ metaEl.textContent=`依頼ID: ${reqId}`;
+
+ try{
+
+  setLoading(true,"一覧を取得中...");
+
+  const res=await jsonpGet_(reqId,token);
+
+  if(res.ok===false) throw new Error(res.error);
+
+  items=(res.items||[]).map(x=>({
+
+    personId:x.personId,
+    personName:x.personName,
+    status:x.status || "COMPLETED"
+
+  }));
+
+  render();
+
+ }catch(err){
+
+  errorEl.textContent=String(err);
+
+ }finally{
+
+  setLoading(false);
+
+ }
+
+ submitEl.onclick=()=>{
+
+  try{
+
+   setLoading(true,"送信中...");
+
+   const payload={
+    reqId,
+    token,
+    items
+   };
+
+   document.getElementById("payloadInput").value=JSON.stringify(payload);
+
+   const f=document.getElementById("submitForm");
+
+   f.action=GAS_EXEC;
+
+   f.submit();
+
+   showToast("送信しました");
+
+   setTimeout(()=>{
     setLoading(false);
-    liff.login({ redirectUri: window.location.href });
-    return;
+    metaEl.textContent="送信しました";
+   },900);
+
+  }catch(err){
+
+   setLoading(false);
+   errorEl.textContent=String(err);
+   submitEl.disabled=false;
+
   }
 
-  const profile = await liff.getProfile();
-  userId = profile.userId;
+ };
 
-  metaEl.textContent = `依頼ID: ${reqId}`;
-
-  try {
-    setLoading(true, "一覧を取得中...");
-    const res = await jsonpGet_(reqId, userId);
-    if (res.ok === false) throw new Error(res.error || "error");
-
-    items = (res.items || []).map(x => ({
-      personId: x.personId,
-      personName: x.personName,
-      status: x.status || "COMPLETED",
-    }));
-
-    render();
-  } catch (err) {
-    errorEl.textContent = String(err);
-    // 取得失敗は “未報告なし” ではなくエラーなので、renderは呼ばない
-  } finally {
-    setLoading(false);
-  }
-
-  submitEl.addEventListener("click", () => {
-    submitEl.disabled = true;
-    errorEl.textContent = "";
-
-    try {
-      setLoading(true, "送信中...");
-
-      const payload = { reqId, userId, items };
-      document.getElementById("submitForm").action = GAS_EXEC;
-      document.getElementById("payloadInput").value = JSON.stringify(payload);
-      document.getElementById("submitForm").submit();
-
-      // ✅ 送信メッセージ表示
-      showToast("送信しました");
-
-      // ✅ LIFF内なら少し見せてから閉じる
-      setTimeout(() => {
-        setLoading(false);
-        if (liff.isInClient()) liff.closeWindow();
-        else metaEl.textContent = "送信しました";
-      }, 900);
-
-    } catch (err) {
-      setLoading(false);
-      errorEl.textContent = String(err);
-      submitEl.disabled = false;
-    }
-  });
 }
 
-main().catch(err => {
-  setLoading(false);
-  errorEl.textContent = String(err);
-});
+main();
 </script>
 </body>
 </html>
